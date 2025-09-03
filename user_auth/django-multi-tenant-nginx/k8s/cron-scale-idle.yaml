@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: CronJob
+metadata: { name: scale-idle-users, namespace: platform }
+spec:
+  schedule: "*/15 * * * *"
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 1
+  jobTemplate:
+    spec:
+      template:
+        spec:
+
+          serviceAccountName: managersvc-sa
+          restartPolicy: OnFailure
+          containers:
+            - name: caller
+              image: managersvc:latest
+              imagePullPolicy: IfNotPresent
+              workingDir: "/app/managersvc"
+              command: ["sh","-lc","python - <<'PY'\nfrom shared.celery import app; app.send_task('users.tasks.scale_idle_users_task', kwargs={'idle_minutes':60}); print('task sent')\nPY"]
+              env:
+                - { name: DJANGO_SETTINGS_MODULE, value: "managersvc.settings" }
+                - { name: CELERY_BROKER_URL, value: "redis://redis.platform.svc.cluster.local:6379/0" }
+                - { name: CELERY_RESULT_BACKEND, value: "redis://redis.platform.svc.cluster.local:6379/1" }

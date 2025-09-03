@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-configuration
+  namespace: ingress-nginx
+data:
+  # 基本配置
+  use-proxy-protocol: "false"
+  worker-processes: "auto"
+  worker-connections: "1024"
+  keep-alive: "65"
+  # 解决探针问题的配置
+  health-checks: "true"
+  status-port: "10254"

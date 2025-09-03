@@ -1,0 +1,80 @@
+# 添加 Deployment 和 Service 模板
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: nginx-{{user_id}}
+  namespace: user-{{user_id}}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: nginx
+      user: {{user_id}}
+  template:
+    metadata:
+      labels:
+        app: nginx
+        user: {{user_id}}
+    spec:
+      containers:
+      - name: nginx
+        image: nginx:latest
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "200m"
+            memory: "256Mi"
+        ports:
+        - containerPort: 80
+        volumeMounts:
+        - name: nginx-config
+          mountPath: /etc/nginx/conf.d
+      volumes:
+      - name: nginx-config
+        configMap:
+          name: nginx-config-{{username}}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service-{{user_id}}
+  namespace: user-{{user_id}}
+spec:
+  selector:
+    app: nginx
+    user: {{user_id}}
+  ports:
+  - port: 80
+    targetPort: 80
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config-{{username}}
+  namespace: user-{{user_id}}
+data:
+  default.conf: |
+    server {
+        listen 80;
+        server_name {{username}}.localhost;
+        charset utf-8;
+
+        access_log /var/log/nginx/access.log;
+        error_log /var/log/nginx/error.log;
+
+        location / {
+            root /usr/share/nginx/html;
+            index index.html;
+            try_files $uri $uri/ =404;
+        }
+
+        location /health {
+            access_log off;
+            return 200 "healthy\n";
+            add_header Content-Type text/plain;
+        }
+
+        location /user-info {
+            return 200 '{"user_id":

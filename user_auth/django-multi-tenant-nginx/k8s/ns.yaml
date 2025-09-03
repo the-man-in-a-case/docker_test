@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata: { name: platform }
+---
+apiVersion: v1
+kind: Namespace
+metadata: { name: tenant-a }   # 默认租户命名空间

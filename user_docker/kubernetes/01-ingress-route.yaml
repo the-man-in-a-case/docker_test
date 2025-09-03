@@ -1,0 +1,61 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: user-platform-ingress
+  namespace: user-platform
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: 'false'
+    nginx.ingress.kubernetes.io/auth-url: 'http://auth-service.user-platform.svc.cluster.local:8000/api/auth/verify/'
+    nginx.ingress.kubernetes.io/auth-signin:  'http://auth-service.user-platform.svc.cluster.local:8000/api/auth/login/'
+    nginx.ingress.kubernetes.io/auth-response-headers: 'X-User-Id, X-Username, X-Email'
+    nginx.ingress.kubernetes.io/cookie-samesite: 'Lax'
+    nginx.ingress.kubernetes.io/cookie-secure: 'false'
+    nginx.ingress.kubernetes.io/session-cookie-name: 'user_session'
+    nginx.ingress.kubernetes.io/session-cookie-path: '/'
+    nginx.ingress.kubernetes.io/use-regex: 'true'
+spec:
+  ingressClassName: nginx
+  rules:
+  - host: localhost
+    http:
+      paths:
+      - path: /api/auth
+        pathType: Prefix
+        backend:
+          service:
+            name: auth-service
+            port:
+              number: 80
+      - path: /api/users
+        pathType: Prefix
+        backend:
+          service:
+            name: user-management-service
+            port:
+              number: 80
+      - path: /users/(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: user-management-service
+            port:
+              number: 80
+      - path: /user/(.*)/(.*)
+        pathType: Prefix
+        backend:
+          service:
+            name: user-management-service
+            port:
+              number: 80
+  # 修改通配符路由配置
+  - host: '*.localhost'
+    http:
+      paths:
+      - path: /
+        pathType: Prefix
+        backend:
+          service:
+            name: nginx-service-{{user_id}}  # 需通过自定义控制器或注解实现动态替换
+            port:
+              number: 80

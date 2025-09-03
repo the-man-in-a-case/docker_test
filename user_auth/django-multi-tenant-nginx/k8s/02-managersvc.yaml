@@ -1,0 +1,130 @@
+# 在 users/k8s.ensure_stack 里打开 topologySpreadConstraints、affinity、podSecurityContext 等生产选项。
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: managersvc-web, namespace: platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: managersvc-web } }
+  template:
+    metadata: { labels: { app: managersvc-web } }
+    spec:
+      serviceAccountName: managersvc-sa
+      containers:
+        - name: web
+          image: managersvc:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          env:
+            - { name: PYTHONPATH, value: "/app" }
+            - { name: DJANGO_SETTINGS_MODULE, value: "managersvc.settings" }
+            - { name: DJANGO_SECRET, valueFrom: { secretKeyRef: { name: app-secrets, key: DJANGO_SECRET } } }
+            - { name: JWT_SECRET, valueFrom: { secretKeyRef: { name: app-secrets, key: JWT_SECRET } } }
+            - { name: ROUTE_SIGNING_SECRET, valueFrom: { secretKeyRef: { name: app-secrets, key: ROUTE_SIGNING_SECRET } } }
+            - { name: MYSQL_HOST, value: "mysql.platform.svc.cluster.local" }
+            - { name: MYSQL_DB, value: "tenants" }
+            - { name: MYSQL_USER, value: "tenants" }
+            - { name: MYSQL_PASSWORD, value: "tenants_pass" }
+            - { name: MYSQL_PORT, value: "3306" }
+            - { name: CELERY_BROKER_URL, value: "redis://redis.platform.svc.cluster.local:6379/0" }
+            - { name: CELERY_RESULT_BACKEND, value: "redis://redis.platform.svc.cluster.local:6379/1" }
+            - { name: K8S_IN_CLUSTER, value: "true" }
+            - { name: DEFAULT_USER_NS, value: "tenant-a" }
+          ports: [{ containerPort: 8000 }]
+          readinessProbe: { httpGet: { path: "/health", port: 8000 }, initialDelaySeconds: 3, periodSeconds: 10 }
+---
+apiVersion: v1
+kind: Service
+metadata: { name: managersvc, namespace: platform }
+spec:
+  selector: { app: managersvc-web }
+  ports: [{ port: 8000, targetPort: 8000 }]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: managersvc-worker, namespace: platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: managersvc-worker } }
+  template:
+    metadata: { labels: { app: managersvc-worker } }
+    spec:
+      serviceAccountName: managersvc-sa
+      containers:
+        - name: worker
+          image: managersvc:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          workingDir: "/app/managersvc"
+          command: ["celery","-A","shared.celery","worker","-l","info","--concurrency","2", "--logfile=/dev/stdout"]
+          env:
+            - { name: PYTHONPATH, value: "/app" }
+            - { name: DJANGO_SETTINGS_MODULE, value: "managersvc.settings" }
+            - { name: CELERY_BROKER_URL, value: "redis://redis.platform.svc.cluster.local:6379/0" }
+            - { name: CELERY_RESULT_BACKEND, value: "redis://redis.platform.svc.cluster.local:6379/1" }
+            - { name: MYSQL_HOST, value: "mysql.platform.svc.cluster.local" }
+            - { name: MYSQL_DB, value: "tenants" }
+            - { name: MYSQL_USER, value: "tenants" }
+            - { name: MYSQL_PASSWORD, value: "tenants_pass" }
+            - { name: MYSQL_PORT, value: "3306" }
+            - { name: K8S_IN_CLUSTER, value: "true" }
+            - { name: DEFAULT_USER_NS, value: "tenant-a" }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata: { name: managersvc-beat, namespace: platform }
+spec:
+  replicas: 1
+  selector: { matchLabels: { app: managersvc-beat } }
+  template:
+    metadata: { labels: { app: managersvc-beat } }
+    spec:
+      serviceAccountName: managersvc-sa
+      containers:
+        - name: beat
+          image: managersvc:latest
+          imagePullPolicy: IfNotPresent
+          resources:
+            requests:
+              cpu: "500m"
+              memory: "512Mi"
+            limits:
+              cpu: "1000m"
+              memory: "1Gi"
+          workingDir: "/app/managersvc"
+          command: ["sh","-c"]
+          args:
+            - |
+              # 动态修改 settings.py
+              echo "
+              # Auto-added by Kubernetes
+              INSTALLED_APPS += ['django_celery_beat']
+              CELERY_BEAT_SCHEDULER = 'django_celery_beat.schedulers:DatabaseScheduler'
+              " >> /app/managersvc/managersvc/settings.py
+
+              celery -A shared.celery beat -l info --logfile=/dev/stdout
+
+          env:
+
+            - { name: PYTHONPATH, value: "/app" }
+            - { name: DJANGO_SETTINGS_MODULE, value: "managersvc.settings" }
+            - { name: CELERY_BROKER_URL, value: "redis://redis.platform.svc.cluster.local:6379/0" }
+            - { name: CELERY_RESULT_BACKEND, value: "redis://redis.platform.svc.cluster.local:6379/1" }
+            - { name: MYSQL_HOST, value: "mysql.platform.svc.cluster.local" }
+            - { name: MYSQL_DB, value: "tenants" }
+            - { name: MYSQL_USER, value: "tenants" }
+            - { name: MYSQL_PASSWORD, value: "tenants_pass" }
+            - { name: MYSQL_PORT, value: "3306" }
+            - { name: K8S_IN_CLUSTER, value: "true" }
+            - { name: DEFAULT_USER_NS, value: "tenant-a" }

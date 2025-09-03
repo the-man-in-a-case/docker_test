@@ -1,0 +1,157 @@
+# # 修正后的Ingress配置，使用标准路径格式
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: multi-tenant-ingress
+#   namespace: platform
+#   annotations:
+#     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+#     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+#     # 路径重写规则
+#     nginx.ingress.kubernetes.io/rewrite-target: /$2
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     - http:
+#         paths:
+#           # 主应用 - 根路径
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: dispatcher
+#                 port: { number: 80 }
+          
+#           # 管理后台 - /admin 路径
+#           - path: /manager(/|$)(.*)
+#             pathType: ImplementationSpecific
+#             backend:
+#               service:
+#                 name: managersvc
+#                 port: { number: 8000 }
+          
+#           # 认证服务 - /auth 路径
+#           - path: /auth(/|$)(.*)
+#             pathType: ImplementationSpecific
+#             backend:
+#               service:
+#                 name: authsvc
+#                 port: { number: 8000 }
+
+---
+# 带认证的Ingress配置，用于需要认证的端点
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: user-router-auth
+  namespace: platform
+  annotations:
+    # 外部认证到AuthN服务
+    nginx.ingress.kubernetes.io/auth-url: "http://authsvc.platform.svc.cluster.local:8000/auth/validate"
+    nginx.ingress.kubernetes.io/auth-method: "POST"
+    nginx.ingress.kubernetes.io/auth-response-headers: "X-User-ID,X-User-NS,X-Route-Timestamp,X-Route-Signature"
+    # Ingress层限流
+    nginx.ingress.kubernetes.io/limit-rps: "5"
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: "5"
+    nginx.ingress.kubernetes.io/limit-connections: "10"
+    # 超时调优
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "30"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "30"
+    # 认证缓存
+    nginx.ingress.kubernetes.io/auth-cache-key: "$remote_user$http_authorization"
+    nginx.ingress.kubernetes.io/auth-cache-duration: "200 5m"
+    # 传递原始URI
+    nginx.ingress.kubernetes.io/auth-snippet: |
+      proxy_set_header X-Original-URI $request_uri;
+      proxy_set_header X-Original-Method $request_method;
+      proxy_set_header X-User-ID $upstream_http_x_user_id;
+      proxy_set_header X-User-NS $upstream_http_x_user_ns;
+      proxy_set_header X-User-Role $upstream_http_x_user_role;
+      proxy_set_header X-Route-Timestamp $upstream_http_x_route_timestamp;
+      proxy_set_header X-Route-Signature $upstream_http_x_route_signature;
+      proxy_set_header Authorization $http_authorization;
+    # 基础配置
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+    nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+    nginx.ingress.kubernetes.io/rewrite-target: /$1
+spec:
+  ingressClassName: nginx
+  rules:
+    - http:
+        paths:
+          - path: /api(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: dispatcher
+                port:
+                  number: 8000
+
+          # ==== 2. ManagerSvc (管理员 API，直连，不走 dispatcher) ====
+          - path: /managersvc(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: managersvc
+                port:
+                  number: 8000
+
+          # ==== 3. AuthSvc (JWT 签发/验证直测，不走 dispatcher) ====
+          - path: /authsvc(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: authsvc
+                port:
+                  number: 8000
+          # 需要认证的应用路径
+          # - path: /
+          #   pathType: Prefix
+          #   backend:
+          #     service:
+          #       name: dispatcher
+          #       port: { number: 80 }
+
+# ---
+# 使用子域名的Ingress配置（推荐，避免路径冲突）
+# apiVersion: networking.k8s.io/v1
+# kind: Ingress
+# metadata:
+#   name: subdomain-ingress
+#   namespace: platform
+#   annotations:
+#     nginx.ingress.kubernetes.io/ssl-redirect: "false"
+#     nginx.ingress.kubernetes.io/backend-protocol: "HTTP"
+# spec:
+#   ingressClassName: nginx
+#   rules:
+#     # 本地测试用子域名
+#     - host: admin.localhost
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: managersvc
+#                 port: { number: 8000 }
+    
+#     - host: auth.localhost
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: authsvc
+#                 port: { number: 8000 }
+    
+#     - host: api.localhost
+#       http:
+#         paths:
+#           - path: /
+#             pathType: Prefix
+#             backend:
+#               service:
+#                 name: dispatcher
+#                 port: { number: 80 }

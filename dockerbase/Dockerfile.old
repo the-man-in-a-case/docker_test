@@ -1,0 +1,40 @@
+# 使用 Python 3.10-alpine 作为基础镜像
+FROM python:3.10-alpine
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量，避免 Python 写入 pyc 文件和缓冲输出
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # 设置 MySQL 客户端环境变量
+    MYSQLCLIENT_CFLAGS="-I/usr/include/mysql" \
+    MYSQLCLIENT_LDFLAGS="-L/usr/lib -lmysqlclient"
+
+# 安装 MySQL 客户端依赖和构建工具
+# mariadb-connector-c-dev 提供 MySQL 客户端开发库
+# gcc 和 musl-dev 用于编译 Python 的 MySQL 客户端包
+RUN apk add --no-cache mariadb-connector-c-dev gcc musl-dev supervisor
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir "django>=4.0,<5.0" "mysqlclient>=2.1.0"
+
+RUN pip install --no-cache-dir --upgrade supervisor
+
+# 创建基础 Django 项目
+RUN django-admin startproject core .
+
+# 设置文件权限
+RUN chmod -R 755 /app
+
+# 验证安装
+# CMD ["python", "-c", "import django; import MySQLdb; print('Django版本:', django.__version__); print('MySQL客户端已安装')"]
+# 创建 supervisord 配置文件
+RUN mkdir -p /etc/supervisor/conf.d
+COPY supervisord.conf /etc/supervisor/conf.d/
+
+# 暴露 Django 服务端口
+EXPOSE 8000
+
+# 使用 supervisord 启动服务
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

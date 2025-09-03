@@ -1,0 +1,51 @@
+
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: datama-db
+  namespace: user-health
+  labels:
+    app: datama-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: datama-db
+  template:
+    metadata:
+      labels:
+        app: datama-db
+    spec:
+      containers:
+      - name: datama-db
+        image: alter:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8001
+        # 可选：资源限制
+        resources:
+          requests:
+            cpu: "100m"
+            memory: "128Mi"
+          limits:
+            cpu: "500m"
+            memory: "256Mi"
+        # 可选：环境变量
+        env:
+        - name: DEBUG
+          value: "True"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: datama-db-service
+  namespace: user-health
+  labels:
+    app: datama-db
+spec:
+  selector:
+    app: datama-db
+  ports:
+  - port: 8001
+    targetPort: 8001
+  type: ClusterIP

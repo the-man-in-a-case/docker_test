@@ -1,0 +1,62 @@
+# 使用 Python 3.10-alpine 作为基础镜像
+FROM python:3.10-alpine
+
+# 设置工作目录
+WORKDIR /app
+
+# 设置环境变量，避免 Python 写入 pyc 文件和缓冲输出
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    # 设置 MySQL 客户端环境变量
+    MYSQLCLIENT_CFLAGS="-I/usr/include/mysql" \
+    MYSQLCLIENT_LDFLAGS="-L/usr/lib -lmysqlclient" \
+    # Celery 环境变量
+    CELERY_BROKER_URL=amqp://guest:guest@rabbitmq:5672// \
+    CELERY_RESULT_BACKEND=redis://redis:6379/0
+
+
+# 配置Alpine仓库
+RUN echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/main" > /etc/apk/repositories && \
+    echo "https://dl-cdn.alpinelinux.org/alpine/v3.21/community" >> /etc/apk/repositories
+
+RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
+
+RUN apk add --no-cache ca-certificates
+
+# 安装 MySQL 客户端依赖、构建工具以及 Celery 依赖
+RUN apk update && \
+    apk add --no-cache \
+        mariadb-connector-c-dev \
+        gcc \
+        musl-dev \
+        supervisor \
+        redis \
+        rabbitmq-c \
+        rabbitmq-c-dev
+
+
+# 安装 Python 依赖
+RUN pip install --no-cache-dir "django>=4.0,<5.0" "mysqlclient>=2.1.0" \
+    # 安装 Celery 及相关依赖
+    "celery>=5.2.0,<6.0.0" \
+    "redis>=4.0.0,<5.0.0" \
+    "billiard>=3.6.4.0" \
+    "kombu>=5.2.0,<6.0.0"
+
+RUN pip install --no-cache-dir --upgrade supervisor
+
+# 创建基础 Django 项目
+RUN django-admin startproject core .
+
+# 设置文件权限
+RUN chmod -R 755 /app
+
+# 创建 supervisord 配置文件目录
+RUN mkdir -p /etc/supervisor/conf.d
+COPY supervisord.conf /etc/supervisor/conf.d/
+
+# 暴露 Django 服务端口
+EXPOSE 8000
+
+# 使用 supervisord 启动服务
+CMD ["supervisord", "-n", "-c", "/etc/supervisor/conf.d/supervisord.conf"]

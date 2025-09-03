@@ -1,0 +1,23 @@
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: celery-worker-scaler
+  namespace: django-celery  #your-namespace
+spec:
+  scaleTargetRef:
+    kind: Deployment
+    name: celery-worker  # 你的 Celery Worker Deployment 名称
+  pollingInterval: 1              # 可选，检查队列的间隔时间（秒）
+  cooldownPeriod: 30               # 可选，缩放冷却时间（秒）
+  minReplicaCount: 1               # 最小副本数（无消息时为0）
+  maxReplicaCount: 1000             # 最大副本数
+  triggers:
+  - type: rabbitmq
+    metadata:
+      host: amqp://admin:admin@rabbitmq-service.django-celery.svc.cluster.local:5672  # RabbitMQ 连接字符串
+      # queueName: calculation      # 要监听的队列名称
+      queueName: celery
+      mode: QueueLength
+      value: "1"
+        #queueLength: "1"                # 每个 Pod 处理的消息数（设置为1表示一条消息一个worker）
+        #protocol: auto                  # 自动检测协议

@@ -1,0 +1,104 @@
+# nginx-ingress-complete-rbac.yaml
+# 1. 创建专用服务账户（避免使用默认账户）
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-ingress-serviceaccount
+  namespace: ingress-nginx
+---
+# 2. 定义集群级角色（覆盖集群范围资源权限）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+rules:
+  # 允许访问 IngressClasses（解决 ingressclasses 权限问题）
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问 Secrets（解决 secrets 权限问题）
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问集群级 Services 和 Endpoints
+  - apiGroups: [""]
+    resources: ["services", "endpoints"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问集群级 Ingress 资源
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "update"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses/status"]
+    verbs: ["update"]
+---
+# 3. 定义命名空间级角色（覆盖 ingress-nginx 命名空间内资源权限）
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nginx-ingress-role
+  namespace: ingress-nginx
+rules:
+  # 允许创建/访问 ConfigMaps（解决 leader 选举的 configmaps 权限问题）
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["create", "get", "list", "watch", "update"]
+  # 允许创建 Events（解决 events 权限问题）
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  # 允许访问命名空间内的 Services、Endpoints、Pods
+  - apiGroups: [""]
+    resources: ["services", "endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问命名空间内的 ConfigMaps（如 nginx-configuration）
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch", "update"]
+---
+# 4. 绑定集群角色到服务账户
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: nginx-ingress-clusterrolebinding
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+roleRef:
+  kind: ClusterRole
+  name: nginx-ingress-clusterrole
+  apiGroup: rbac.authorization.k8s.io
+---
+# 5. 绑定命名空间角色到服务账户
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nginx-ingress-rolebinding
+  namespace: ingress-nginx
+subjects:
+  - kind: ServiceAccount
+    name: nginx-ingress-serviceaccount
+    namespace: ingress-nginx
+roleRef:
+  kind: Role
+  name: nginx-ingress-role
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: nginx-ingress-clusterrole
+rules:
+  # 允许访问 IngressClasses（解决 ingressclasses 权限问题）
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingressclasses"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问 Secrets（解决 secrets 权限问题）
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问集群级 ConfigMaps（新增，解决集群级 configmaps 权限问题）
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]

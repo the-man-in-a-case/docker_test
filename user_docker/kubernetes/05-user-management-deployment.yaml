@@ -1,0 +1,66 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: user-management
+  namespace: user-platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: user-management
+  template:
+    metadata:
+      labels:
+        app: user-management
+    spec:
+      serviceAccountName: user-management-sa
+      containers:
+      - name: user-management
+        image: user-management:1.0
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 8000
+        resources:
+          requests:
+            cpu: "200m"
+            memory: "256Mi"
+          limits:
+            cpu: "500m"
+            memory: "512Mi"
+        env:
+        - name: SECRET_KEY
+          value: "c2VjcmV0X2tleV9mb3JfZGphbmdv"
+        - name: DEBUG
+          value: "False"
+        - name: DB_ENGINE
+          value: "django.db.backends.mysql"
+        - name: DB_NAME
+          value: "user_management"
+        - name: DB_USER
+          value: django
+        - name: DB_PASSWORD
+          value: password
+        - name: DB_HOST
+          value: "mysql-service.user-platform.svc.cluster.local"
+        - name: DB_PORT
+          value: "3306"
+        - name: CELERY_BROKER_URL
+          value: "amqp://admin:password@rabbitmq-service.user-platform.svc.cluster.local:5672//"
+        - name: CELERY_RESULT_BACKEND
+          value: "redis://redis-service.user-platform.svc.cluster.local:6379/0"
+        - name: K8S_NAMESPACE
+          value: "user-platform"
+        - name: DOMAIN
+          value: "localhost"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: user-management-service
+  namespace: user-platform
+spec:
+  selector:
+    app: user-management
+  ports:
+  - port: 80
+    targetPort: 8000

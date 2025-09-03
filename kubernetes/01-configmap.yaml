@@ -1,0 +1,29 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: django-config
+  namespace: django-celery
+data:
+  DJANGO_SETTINGS_MODULE: "core.settings"
+  # 数据库配置 - 明文形式
+  MYSQL_DATABASE: "django_db"
+  MYSQL_HOST: "mysql-service.django-celery.svc.cluster.local"
+  MYSQL_PORT: "3306"
+  MYSQL_USER: "admin"
+  MYSQL_PASSWORD: "admin"
+  # Redis配置
+  REDIS_HOST: "redis-service.django-celery.svc.cluster.local"
+  REDIS_PORT: "6379"
+  REDIS_DB: "0"
+  REDIS_PASSWORD: ""  # 空密码
+  # RabbitMQ配置 - 明文形式
+  RABBITMQ_HOST: "rabbitmq-service.django-celery.svc.cluster.local"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_VHOST: "/"
+  RABBITMQ_USER: "admin"
+  RABBITMQ_PASSWORD: "admin"
+  # Celery配置
+  CELERY_BROKER_URL: "amqp://admin:admin@rabbitmq-service.django-celery.svc.cluster.local:5672/"
+  CELERY_RESULT_BACKEND: "redis://redis-service.django-celery.svc.cluster.local:6379/0"
+  # # Django密钥
+  # DJANGO_SECRET_KEY: "secret_key_for_django"

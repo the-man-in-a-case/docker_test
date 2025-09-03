@@ -1,0 +1,504 @@
+# ========== Dockerfile ==========
+FROM python:3.10-alpine
+WORKDIR /app
+COPY shared /app/shared
+COPY authsvc /app/authsvc
+COPY shared/requirements.txt /app/requirements.txt
+ENV DEBIAN_FRONTEND=noninteractive
+
+# 安装系统依赖：
+# - pkg-config：用于编译时查找库文件
+# - default-libmysqlclient-dev：MySQL开发库
+# - build-essential：提供编译工具（gcc等）
+# - && rm -rf /var/lib/apt/lists/*：清理缓存，减小镜像体积
+RUN apk add --no-cache \
+    pkgconf \
+    mysql-dev \
+    gcc \
+    musl-dev \
+    && rm -rf /var/cache/apk/*
+RUN pip install --no-cache-dir -r requirements.txt && \
+    pip install --no-cache-dir gunicorn
+# 设置Python路径
+ENV PYTHONPATH=/app
+WORKDIR /app/authsvc
+
+ENV DJANGO_SETTINGS_MODULE=authsvc.settings
+# 启动脚本在 startup.sh 中
+CMD ["/app/authsvc/startup.sh"]
+
+# ========== manage.py ==========
+#!/usr/bin/env python
+"""Django's command-line utility for administrative tasks."""
+import os
+import sys
+
+
+def main():
+    """Run administrative tasks."""
+    os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authsvc.settings')
+    try:
+        from django.core.management import execute_from_command_line
+    except ImportError as exc:
+        raise ImportError(
+            "Couldn't import Django. Are you sure it's installed and "
+            "available on your PYTHONPATH environment variable? Did you "
+            "forget to activate a virtual environment?"
+        ) from exc
+    execute_from_command_line(sys.argv)
+
+
+if __name__ == '__main__':
+    main()
+
+# ========== startup.sh ==========
+#!/bin/sh
+
+# 检查数据库是否就绪
+check_db() {
+    python -c "
+import os
+import time
+import pymysql
+
+success = False
+max_retries = 30
+retry_count = 0
+
+while not success and retry_count < max_retries:
+    try:
+        conn = pymysql.connect(
+            host=os.getenv('MYSQL_HOST', 'mysql'),
+            port=int(os.getenv('MYSQL_PORT', '3306')),
+            user=os.getenv('MYSQL_USER', 'tenants'),
+            password=os.getenv('MYSQL_PASSWORD', 'tenants_pass'),
+            database=os.getenv('MYSQL_DB', 'tenants'),
+            connect_timeout=2
+        )
+        conn.close()
+        success = True
+        print('Database is ready!')
+    except Exception as e:
+        retry_count += 1
+        print(f'Database not ready, waiting... ({retry_count}/{max_retries})')
+        time.sleep(2)
+
+if not success:
+    print('Failed to connect to database after multiple attempts.')
+    exit(1)
+"
+}
+
+# 运行数据库迁移
+run_migrations() {
+    python manage.py migrate --noinput
+}
+
+# 创建超级用户（如果不存在）
+create_superuser() {
+    python -c "
+import os
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
+
+if not User.objects.filter(username='admin').exists():
+    User.objects.create_superuser(
+        username='admin',
+        email='admin@example.com',
+        password=os.getenv('ADMIN_PASSWORD', 'admin')
+    )
+    print('Superuser created.')
+else:
+    print('Superuser already exists.')
+"
+}
+
+# 启动Gunicorn服务器
+start_server() {
+    gunicorn \
+        --bind 0.0.0.0:8000 \
+        --workers 2 \
+        --threads 4 \
+        --access-logfile - \
+        --error-logfile - \
+        authsvc.wsgi:application
+}
+
+# 执行流程
+check_db
+run_migrations
+create_superuser
+start_server
+
+# ========== authsvc/__init__.py ==========
+
+# 空文件
+
+# ========== authsvc/asgi.py ==========
+"""
+ASGI config for authsvc project.
+
+It exposes the ASGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.2/howto/deployment/asgi/
+"""
+
+import os
+
+from django.core.asgi import get_asgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authsvc.settings')
+
+application = get_asgi_application()
+
+# ========== authsvc/auth-views.py ==========
+from rest_framework import status, permissions
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.contrib.auth import authenticate, login
+from django.db import connection
+from django.utils import timezone
+from shared.utils import jwt_encode, sign_headers
+
+@api_view(['POST'])
+def login_view(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    user = authenticate(username=username, password=password)
+    
+    if user is not None:
+        # 更新最后访问时间
+        user.last_access_at = timezone.now()
+        user.save(update_fields=['last_access_at'])
+        
+        # 生成JWT令牌
+        token = jwt_encode({'uid': user.id, 'role': user.role})
+        
+        # 生成路由签名（用于Dispatcher认证）
+        ts, sig = sign_headers(user.id, user.namespace)
+        
+        return Response({
+            'token': token,
+            'user_id': user.id,
+            'username': user.username,
+            'role': user.role,
+            'namespace': user.namespace,
+            'route_signature': sig,
+            'route_timestamp': ts
+        }, status=status.HTTP_200_OK)
+    else:
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+@api_view(['POST'])
+def refresh_token_view(request):
+    """刷新JWT令牌"""
+    # 简化实现：实际应该验证旧令牌有效性
+    user_id = request.data.get('user_id')
+    
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    
+    try:
+        user = User.objects.get(id=user_id)
+        new_token = jwt_encode({'uid': user.id, 'role': user.role})
+        return Response({'token': new_token}, status=status.HTTP_200_OK)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def logout_view(request):
+    """登出接口（客户端应删除本地存储的令牌）"""
+    # 简化实现：实际可能需要维护令牌黑名单
+    return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def health_view(request):
+    """健康检查端点"""
+    try:
+        # 检查数据库连接
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        
+        return Response({
+            'status': 'healthy',
+            'service': 'authsvc',
+            'timestamp': timezone.now().isoformat()
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'status': 'unhealthy',
+            'service': 'authsvc',
+            'error': str(e),
+            'timestamp': timezone.now().isoformat()
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+@api_view(['POST'])
+def validate_token(request):
+    """用于Ingress Nginx的auth-request验证"""
+    # 从Authorization头获取令牌
+    auth_header = request.headers.get('Authorization')
+    if not auth_header:
+        return Response({'error': 'Authorization header required'}, status=status.HTTP_401_UNAUTHORIZED)
+    
+    try:
+        # 提取令牌
+        token = auth_header.split(' ')[1] if ' ' in auth_header else auth_header
+        
+        # 验证令牌并获取用户信息
+        from shared.utils import jwt_decode
+        payload = jwt_decode(token)
+        user_id = payload.get('uid')
+        
+        # 获取用户信息
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
+        user = User.objects.get(id=user_id)
+        
+        # 更新最后访问时间
+        user.last_access_at = timezone.now()
+        user.save(update_fields=['last_access_at'])
+        
+        # 生成新的路由签名并添加到响应头
+        ts, sig = sign_headers(user.id, user.namespace)
+        response = Response({'user_id': user.id, 'username': user.username})
+        response['X-User-ID'] = str(user.id)
+        response['X-User-NS'] = user.namespace
+        response['X-User-Role'] = user.role
+        response['X-Route-Timestamp'] = str(ts)
+        response['X-Route-Signature'] = sig
+        
+        return response
+    except Exception as e:
+        return Response({'error': str(e)}, status=status.HTTP_401_UNAUTHORIZED)
+
+# ========== authsvc/cache_utils.py ==========
+import functools
+import redis
+from django.conf import settings
+from django.core.cache import cache
+
+# Redis客户端（用于直接操作Redis）
+redis_client = redis.from_url(settings.REDIS_URL)
+
+class RedisCacheManager:
+    """Redis缓存管理器"""
+    
+    @staticmethod
+    def set(key, value, timeout=3600):
+        """设置缓存"""
+        cache.set(key, value, timeout)
+    
+    @staticmethod
+    def get(key):
+        """获取缓存"""
+        return cache.get(key)
+    
+    @staticmethod
+    def delete(key):
+        """删除缓存"""
+        cache.delete(key)
+    
+    @staticmethod
+    def clear():
+        """清除所有缓存"""
+        cache.clear()
+
+# 缓存装饰器
+def cache_response(timeout=3600):
+    """缓存视图响应的装饰器"""
+    def decorator(view_func):
+        @functools.wraps(view_func)
+        def _wrapped_view(request, *args, **kwargs):
+            # 生成缓存键
+            cache_key = f"view:{view_func.__name__}:{args}:{kwargs}:{request.method}"
+            
+            # 检查是否有缓存
+            cached_response = RedisCacheManager.get(cache_key)
+            if cached_response:
+                return cached_response
+            
+            # 执行视图函数
+            response = view_func(request, *args, **kwargs)
+            
+            # 缓存响应
+            RedisCacheManager.set(cache_key, response, timeout)
+            
+            return response
+        return _wrapped_view
+    return decorator
+
+# ========== authsvc/settings.py ==========
+from shared.settings_base import *
+INSTALLED_APPS += ['authsvc']
+ROOT_URLCONF = 'authsvc.urls'
+WSGI_APPLICATION = 'authsvc.wsgi.application'
+
+MIDDLEWARE = [
+    'django.middleware.security.SecurityMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    'django.middleware.common.CommonMiddleware',
+    'django.middleware.csrf.CsrfViewMiddleware',
+    'django.contrib.auth.middleware.AuthenticationMiddleware',
+    'django.contrib.messages.middleware.MessageMiddleware',
+    'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'shared.middleware.UpdateLastAccessMiddleware',
+]
+
+# 缓存配置
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': os.getenv('REDIS_URL', 'redis://redis:6379/1'),
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
+
+# 会话配置
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+
+# 日志配置
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',
+    },
+}
+
+# ========== authsvc/urls.py ==========
+"""
+URL configuration for authsvc project.
+
+The `urlpatterns` list routes URLs to views. For more information please see:
+    https://docs.djangoproject.com/en/5.2/topics/http/urls/
+Examples:
+Function views
+    1. Add an import:  from my_app import views
+    2. Add a URL to urlpatterns:  path('', views.home, name='home')
+Class-based views
+    1. Add an import:  from other_app.views import Home
+    2. Add a URL to urlpatterns:  path('', Home.as_view(), name='home')
+Including another URLconf
+    1. Import the include() function: from django.urls import include, path
+    2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
+"""
+from django.urls import path
+from .auth_views import (
+    login_view,
+    refresh_token_view,
+    logout_view,
+    health_view,
+    validate_token
+)
+
+urlpatterns = [
+    path('auth/login', login_view, name='login'),
+    path('auth/refresh', refresh_token_view, name='refresh'),
+    path('auth/logout', logout_view, name='logout'),
+    path('auth/validate', validate_token, name='validate'),
+    path('health', health_view, name='health'),
+]
+
+# ========== authsvc/views.py ==========
+from rest_framework import status
+from rest_framework.decorators import api_view
+from rest_framework.response import Response
+from django.contrib.auth import authenticate
+from django.utils import timezone
+from shared.utils import jwt_encode
+
+@api_view(['POST'])
+def LoginView(request):
+    username = request.data.get('username')
+    password = request.data.get('password')
+    
+    user = authenticate(username=username, password=password)
+    if user is not None:
+        # 更新最后访问时间
+        user.last_access_at = timezone.now()
+        user.save(update_fields=['last_access_at'])
+        
+        # 生成JWT令牌
+        token = jwt_encode({'uid': user.id, 'role': user.role})
+        
+        return Response({
+            'token': token,
+            'user_id': user.id,
+            'username': user.username,
+            'role': user.role
+        }, status=status.HTTP_200_OK)
+    else:
+        return Response({'error': 'Invalid credentials'}, status=status.HTTP_401_UNAUTHORIZED)
+
+@api_view(['POST'])
+def RefreshView(request):
+    """刷新JWT令牌"""
+    user_id = request.data.get('user_id')
+    
+    from django.contrib.auth import get_user_model
+    User = get_user_model()
+    
+    try:
+        user = User.objects.get(id=user_id)
+        new_token = jwt_encode({'uid': user.id, 'role': user.role})
+        return Response({'token': new_token}, status=status.HTTP_200_OK)
+    except User.DoesNotExist:
+        return Response({'error': 'User not found'}, status=status.HTTP_404_NOT_FOUND)
+
+@api_view(['POST'])
+def LogoutView(request):
+    """登出接口"""
+    return Response({'message': 'Successfully logged out'}, status=status.HTTP_200_OK)
+
+@api_view(['GET'])
+def HealthView(request):
+    """健康检查端点"""
+    from django.db import connection
+    
+    try:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1")
+            cursor.fetchone()
+        
+        return Response({
+            'status': 'healthy',
+            'service': 'authsvc',
+            'timestamp': timezone.now().isoformat()
+        }, status=status.HTTP_200_OK)
+    except Exception as e:
+        return Response({
+            'status': 'unhealthy',
+            'service': 'authsvc',
+            'error': str(e),
+            'timestamp': timezone.now().isoformat()
+        }, status=status.HTTP_503_SERVICE_UNAVAILABLE)
+
+# ========== authsvc/wsgi.py ==========
+"""
+WSGI config for authsvc project.
+
+It exposes the WSGI callable as a module-level variable named ``application``.
+
+For more information on this file, see
+https://docs.djangoproject.com/en/5.2/howto/deployment/wsgi/
+"""
+
+import os
+
+from django.core.wsgi import get_wsgi_application
+
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'authsvc.settings')
+
+application = get_wsgi_application()

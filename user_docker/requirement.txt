@@ -1,0 +1,29 @@
+# Django核心
+Django==4.2.7
+djangorestframework==3.14.0
+django-cors-headers==4.3.1
+
+# Kubernetes集成
+kubernetes==28.1.0
+PyYAML==6.0.1
+
+# 数据库
+psycopg2-binary==2.9.9
+redis==5.0.1
+
+# 认证与授权
+PyJWT==2.8.0
+cryptography==41.0.7
+
+# HTTP客户端
+requests==2.31.0
+aiohttp==3.9.1
+
+# 异步任务
+celery==5.3.4
+
+# 容器化
+gunicorn==21.2.0
+
+# 开发工具
+python-decouple==3.8

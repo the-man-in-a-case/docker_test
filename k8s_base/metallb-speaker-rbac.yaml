@@ -1,0 +1,44 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: speaker
+  namespace: metallb-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: metallb-speaker-role
+rules:
+  # 允许访问节点信息
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问服务信息
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问端点信息
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问配置映射
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "list", "watch"]
+  # 允许访问 MetalLB CRD 资源
+  - apiGroups: ["metallb.io"]
+    resources: ["ipaddresspools", "addresspools", "communities"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: metallb-speaker-binding
+subjects:
+  - kind: ServiceAccount
+    name: speaker
+    namespace: metallb-system
+roleRef:
+  kind: ClusterRole
+  name: metallb-speaker-role
+  apiGroup: rbac.authorization.k8s.io

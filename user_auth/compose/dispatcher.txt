@@ -1,0 +1,107 @@
+# ========== Dockerfile ==========
+FROM openresty:1.25.3.1-1-bookworm-fat
+
+# 安装必要的Lua模块
+RUN opm get p0pr0ck5/lua-resty-http
+
+# 复制配置文件
+COPY nginx.conf /usr/local/openresty/nginx/conf/nginx.conf
+COPY nginx copy.conf /usr/local/openresty/nginx/conf/nginx_copy.conf
+COPY nginx-final.conf /usr/local/openresty/nginx/conf/nginx_final.conf
+COPY nginx2.conf /usr/local/openresty/nginx/conf/nginx2.conf
+
+# 启动命令
+CMD ["openresty", "-g", "daemon off;"]
+
+# ========== nginx.conf ==========
+worker_processes  1;
+
+events {
+    worker_connections  1024;
+}
+
+http {
+    include       mime.types;
+    default_type  application/octet-stream;
+
+    # 日志配置
+    log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+                      '$status $body_bytes_sent "$http_referer" '
+                      '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log  /dev/stdout  main;
+    error_log   /dev/stderr warn;
+
+    # 优化配置
+    sendfile        on;
+    keepalive_timeout  65;
+
+    # 上游服务配置
+    upstream managersvc {
+        server managersvc.platform.svc.cluster.local:8000;
+    }
+
+    upstream authsvc {
+        server authsvc.platform.svc.cluster.local:8000;
+    }
+
+    server {
+        listen       8080;
+        server_name  localhost;
+
+        # 健康检查端点
+        location /healthz {
+            access_log off;
+            return 200 'ok';
+        }
+
+        # 主路由处理
+        location / {
+            # 从请求头中获取用户信息
+            set $user_id $http_x_user_id;
+            set $user_ns $http_x_user_ns;
+            set $route_ts $http_x_route_timestamp;
+            set $route_sig $http_x_route_signature;
+
+            # 验证签名（防止伪造请求头）
+            access_by_lua_block {
+                local ngx = ngx
+                local user_id = ngx.var.user_id or ""
+                local user_ns = ngx.var.user_ns or ""
+                local route_ts = ngx.var.route_ts or ""
+                local route_sig = ngx.var.route_sig or ""
+                local secret = os.getenv("ROUTE_SIGNING_SECRET") or "default-secret"
+
+                -- 检查必要参数
+                if user_id == "" or user_ns == "" or route_ts == "" or route_sig == "" then
+                    ngx.status = 401
+                    ngx.say("Missing authentication headers")
+                    ngx.exit(ngx.HTTP_UNAUTHORIZED)
+                end
+
+                -- 验证签名（简化版，实际应使用HMAC）
+                local function verify_signature()
+                    -- 这里应该是实际的HMAC验证逻辑
+                    -- 示例中简化处理
+                    return true
+                end
+
+                if not verify_signature() then
+                    ngx.status = 401
+                    ngx.say("Invalid signature")
+                    ngx.exit(ngx.HTTP_UNAUTHORIZED)
+                end
+            }
+
+            # 动态路由到用户命名空间
+            proxy_pass http://user-$user_id-nginx.$user_ns.svc.cluster.local:80;
+
+            # 代理配置
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+        }
+    }
+}
+

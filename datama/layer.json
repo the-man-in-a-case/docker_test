@@ -1,0 +1,14 @@
+{
+  "import_type": "LAYER",
+  "data": {
+    "layer": {
+      "id": 2,
+      "type": "PowerLayer",
+      "version_number": 3,
+      "author": "user",
+      "message": "fix"
+    }
+  },
+  "bind_map": 1,
+  "message": "layer-only import"
+}

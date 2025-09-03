@@ -1,0 +1,144 @@
+# -------------------------------
+# Namespace
+# -------------------------------
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: platform
+---
+# -------------------------------
+# ServiceAccount + RBAC（最小权限）
+# -------------------------------
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: health-service-sa
+  namespace: platform
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: health-service-role
+  namespace: platform
+rules:
+- apiGroups: [""]
+  resources: ["pods","services","endpoints","events"]
+  verbs: ["get","list","watch","create","patch"]
+- apiGroups: ["apps"]
+  resources: ["deployments","replicasets"]
+  verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: health-service-rb
+  namespace: platform
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: health-service-role
+subjects:
+- kind: ServiceAccount
+  name: health-service-sa
+  namespace: platform
+---
+# -------------------------------
+# ConfigMap（运行参数）
+# -------------------------------
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-service-config
+  namespace: platform
+data:
+  CHECK_INTERVAL: "20"          # 周期主动检测间隔（秒）
+  RESTART_THRESHOLD: "3"         # 重启次数阈值
+  LOG_LEVEL: "INFO"
+---
+# -------------------------------
+# Secret（报警通道配置：可留空）
+# -------------------------------
+apiVersion: v1
+kind: Secret
+metadata:
+  name: health-service-secret
+  namespace: platform
+type: Opaque
+stringData:
+  ALERT_SLACK_WEBHOOK: ""        # e.g. https://hooks.slack.com/services/XXX/YYY/ZZZ
+  ALERT_EMAIL_TO: "oncall@example.com"
+  ALERT_EMAIL_FROM: "alerts@example.com"
+  SMTP_HOST: "smtp.example.com"
+  SMTP_PORT: "25"
+---
+# -------------------------------
+# Deployment
+# -------------------------------
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-service
+  namespace: platform
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: health-service
+  template:
+    metadata:
+      labels:
+        app: health-service
+    spec:
+      serviceAccountName: health-service-sa
+      containers:
+      - name: health-service
+        image: your-registry/health-service:latest
+        imagePullPolicy: IfNotPresent
+        env:
+        - name: K8S_NAMESPACE
+          value: "platform"
+        - name: CHECK_INTERVAL
+          valueFrom: { configMapKeyRef: { name: health-service-config, key: CHECK_INTERVAL } }
+        - name: RESTART_THRESHOLD
+          valueFrom: { configMapKeyRef: { name: health-service-config, key: RESTART_THRESHOLD } }
+        - name: LOG_LEVEL
+          valueFrom: { configMapKeyRef: { name: health-service-config, key: LOG_LEVEL } }
+        - name: ALERT_SLACK_WEBHOOK
+          valueFrom: { secretKeyRef: { name: health-service-secret, key: ALERT_SLACK_WEBHOOK } }
+        - name: ALERT_EMAIL_TO
+          valueFrom: { secretKeyRef: { name: health-service-secret, key: ALERT_EMAIL_TO } }
+        - name: ALERT_EMAIL_FROM
+          valueFrom: { secretKeyRef: { name: health-service-secret, key: ALERT_EMAIL_FROM } }
+        - name: SMTP_HOST
+          valueFrom: { secretKeyRef: { name: health-service-secret, key: SMTP_HOST } }
+        - name: SMTP_PORT
+          valueFrom: { secretKeyRef: { name: health-service-secret, key: SMTP_PORT } }
+        ports:
+        - containerPort: 8080
+        readinessProbe:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          httpGet: { path: /health, port: 8080 }
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        resources:
+          requests: { cpu: "100m", memory: "128Mi" }
+          limits:   { cpu: "500m", memory: "512Mi" }
+---
+# -------------------------------
+# Service (ClusterIP)
+# -------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-service
+  namespace: platform
+spec:
+  selector:
+    app: health-service
+  ports:
+  - name: http
+    port: 8080
+    targetPort: 8080

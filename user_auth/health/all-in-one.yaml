@@ -1,0 +1,276 @@
+# ========================================
+# Namespace
+# ========================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: user-health
+
+---
+# ========================================
+# RBAC for Health Service
+# ========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: health-svc-sa
+  namespace: user-health
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  namespace: user-health
+  name: health-svc-role
+rules:
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: health-svc-rb
+  namespace: user-health
+subjects:
+  - kind: ServiceAccount
+    name: health-svc-sa
+    namespace: user-health
+roleRef:
+  kind: Role
+  name: health-svc-role
+  apiGroup: rbac.authorization.k8s.io
+
+---
+# ========================================
+# ConfigMap for Alerts
+# ========================================
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: health-svc-config
+  namespace: user-health
+data:
+  ALERT_SLACK_WEBHOOK: "http://datama-db-service.user-health.svc.cluster.local:8001/webhook/"   # 替换为实际告警 webhook
+
+---
+# ========================================
+# Health Service (FastAPI)
+# ========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: health-svc
+  namespace: user-health
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: health-svc
+  template:
+    metadata:
+      labels:
+        app: health-svc
+    spec:
+      serviceAccountName: health-svc-sa
+      containers:
+        - name: health-svc
+          image: health-service:1.0   # 用 Dockerfile 构建的 FastAPI 服务镜像
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: health-svc-config
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: health-svc
+  namespace: user-health
+spec:
+  selector:
+    app: health-svc
+  ports:
+    - port: 80
+      targetPort: 8000
+
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: django-sa
+  namespace: user-health   
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: django-k8s-manager
+  namespace: user-health
+rules:
+- apiGroups: ["apps"]
+  resources: ["deployments"]
+  verbs: ["get","list","create","patch","delete"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get","list","watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: django-k8s-manager-binding
+  namespace: user-health 
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: django-k8s-manager
+subjects:
+- kind: ServiceAccount
+  name: django-sa
+  namespace: user-health
+---
+
+# ========================================
+# Django Deployment (负责创建/删除用户 -> 管理 Nginx Pods)
+# ========================================
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: django-app
+  namespace: user-health
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: django-app
+  template:
+    metadata:
+      labels:
+        app: django-app
+    spec:
+      serviceAccountName: django-sa
+      containers:
+        - name: django
+          image: health-app:1.0   # 包含 signals + k8s client
+          imagePullPolicy: IfNotPresent
+          resources:
+            limits:
+              cpu: "500m"
+              memory: "512Mi"
+            requests:
+              cpu: "200m"
+              memory: "256Mi"
+          ports:
+            - containerPort: 8000
+
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: django-svc
+  namespace: user-health
+spec:
+  selector:
+    app: django-app
+  ports:
+    - port: 80
+      targetPort: 8000
+---
+# ========================================
+# RBAC for Nginx User Pods
+# ========================================
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: nginx-user-sa
+  namespace: user-health
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: nginx-user-role
+  namespace: user-health
+rules:
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: nginx-user-rb
+  namespace: user-health
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: nginx-user-role
+subjects:
+- kind: ServiceAccount
+  name: nginx-user-sa
+  namespace: user-health
+# ---
+# # ========================================
+# # User-specific Nginx Pod Template (带 sidecar)
+# # 实际由 Django 创建时动态生成
+# # ========================================
+# apiVersion: apps/v1
+# kind: Deployment
+# metadata:
+#   name: nginx-user-template
+#   namespace: user-health
+#   labels:
+#     user: placeholder
+# spec:
+#   replicas: 1
+#   selector:
+#     matchLabels:
+#       app: nginx-user
+#       user: placeholder
+#   template:
+#     metadata:
+#       labels:
+#         app: nginx-user
+#         user: placeholder
+#     spec:
+#       containers:
+#         - name: nginx
+#           image: nginx:alpine
+#           resources:
+#             limits:
+#               cpu: "500m"
+#               memory: "512Mi"
+#             requests:
+#               cpu: "200m"
+#               memory: "256Mi"
+#           ports:
+#             - containerPort: 80
+#         - name: sidecar-detector
+#           image: nginx-sidecar-detector:1.0
+#           imagePullPolicy: IfNotPresent
+#           resources:
+#             limits:
+#               cpu: "500m"
+#               memory: "512Mi"
+#             requests:
+#               cpu: "200m"
+#               memory: "256Mi"
+#           env:
+#             - name: HEALTH_ENDPOINT
+#               value: "http://health-svc.user-health.svc.cluster.local/report"
+#             - name: LOG_PATH
+#               value: "/var/log/nginx/error.log"
+#           volumeMounts:
+#             - name: log-volume
+#               mountPath: /var/log/nginx
+#       volumes:
+#         - name: log-volume
+#           emptyDir: {}

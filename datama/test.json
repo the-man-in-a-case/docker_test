@@ -1,0 +1,204 @@
+{
+  "BaseNode": [
+    {
+      "id": 1,
+      "base_node_name": "示例节点",
+      "base_node_desc": "节点描述",
+      "geo_location": "位置描述",
+      "nation": "中国",
+      "province": "某省",
+      "city": "某市",
+      "district": "某区",
+      "street": "某街道",
+      "no": "100号",
+      "location": "坐标信息",
+      "attribute": {},
+      "cis_type": "001",
+      "sub_type": "1-1Terminal",
+      "model_name": "仿真模型X",
+      "coverage": "区域范围",
+      "owner": "所有者A"
+    }
+  ],
+  "BaseEdge": [
+    {
+      "id": 1,
+      "base_edge_name": "示例边",
+      "base_edge_desc": "边描述",
+      "geo_location": "位置信息",
+      "nation": "中国",
+      "province": "某省",
+      "city": "某市",
+      "district": "某区",
+      "street": "某街道",
+      "no": "200号",
+      "location": "坐标信息",
+      "attribute": {}
+    }
+  ],
+  "Map": [
+    {
+      "id": 1,
+      "version_number": 1,
+      "author": "作者A",
+      "message": "提交说明",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "Layer": [
+    {
+      "id": 1,
+      "type": "PowerLayer",
+      "create_time": "2025-01-01T00:00:00Z",
+      "version_number": 1,
+      "author": "作者B",
+      "message": "版本说明",
+      "created_at": "2025-01-01T00:00:00Z",
+      "updated_at": "2025-01-01T00:00:00Z"
+    }
+  ],
+  "MapLayer": [
+    {
+      "id": 1,
+      "map": 1,
+      "layer": 1
+    }
+  ],
+  "Node": [
+    {
+      "id": 1,
+      "layer": 1,
+      "base_node": 1
+    }
+  ],
+  "MechanismRelationship": [
+    {
+      "id": 1,
+      "business": "业务关系",
+      "function": "功能说明",
+      "composition": "组成说明",
+      "behavior": "行为关系",
+      "state": "状态关系"
+    }
+  ],
+  "Edge": [
+    {
+      "base_edge": 1,
+      "source_node": 1,
+      "mechanism_relationship": 1,
+      "destination_node": 1
+    }
+  ],
+  "IntraEdge": [
+    {
+      "id": 1,
+      "layer": 1,
+      "edge": 1
+    }
+  ],
+  "Configuration": [
+    {
+      "id": 1,
+      "layer": 1
+    }
+  ],
+  "Technique": [
+    {
+      "id": 1,
+      "type": "SELECT"
+    }
+  ],
+  "TargetNode": [
+    {
+      "id": 1,
+      "technique": 1,
+      "node": 1,
+      "target_sequence": 0,
+      "target_effect": 1.0
+    }
+  ],
+  "Diagram": [
+    {
+      "id": 1,
+      "map": 1,
+      "configuration": 1,
+      "technique": 1
+    }
+  ],
+  "Condition": [
+    {
+      "id": 1,
+      "status": "Initial"
+    }
+  ],
+  "Record": [
+    {
+      "id": 1,
+      "record_data": {}
+    }
+  ],
+  "Execution": [
+    {
+      "id": 1,
+      "iteration": 0,
+      "record": 1
+    }
+  ],
+  "AnalysisAlgorithm": [
+    {
+      "id": 1,
+      "name": "算法A",
+      "parameters": "公式参数"
+    }
+  ],
+  "FormatConversion": [
+    {
+      "id": 1,
+      "input_format": "JSON",
+      "output_format": "CSV"
+    }
+  ],
+  "Result": [
+    {
+      "id": 1,
+      "analysis_algorithm": 1,
+      "format_conversion": 1
+    }
+  ],
+  "Simulation": [
+    {
+      "id": 1,
+      "condition": 1,
+      "execution": 1,
+      "result": 1
+    }
+  ],
+  "Project": [
+    {
+      "id": 1,
+      "diagram": 1,
+      "simulation": 1
+    }
+  ],
+  "ResourceImportJob": [
+    {
+      "id": 1,
+      "import_type": "MAP",
+      "target_map": 1,
+      "target_layer": null,
+      "imported_data": {},
+      "status": "PENDING",
+      "created_at": "2025-01-01T00:00:00Z",
+      "completed_at": null
+    }
+  ],
+  "MapVersionSnapshot": [
+    {
+      "id": 1,
+      "from_map": 1,
+      "to_map": 1,
+      "created_at": "2025-01-01T00:00:00Z"
+    }
+  ]
+}

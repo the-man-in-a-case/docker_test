@@ -1,0 +1,28 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: demo-app-ingress
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+    nginx.ingress.kubernetes.io/ssl-redirect: "false"
+spec:
+  ingressClassName: nginx
+  rules:
+  - http:  # 不指定host，直接通过IP访问
+      paths:
+      - path: /demo
+        pathType: Prefix
+        backend:
+          service:
+            name: demo-app-service
+            port:
+              number: 80
+      # 可以添加更多路径路由到不同服务
+      # - path: /app2
+      #   pathType: Prefix
+      #   backend:
+      #     service:
+      #       name: app2-service
+      #       port:
+      #         number: 80
+    
